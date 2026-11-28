@@ -83,17 +83,15 @@ test("multiSig client uses the injected server, asset and network passphrase", a
     networkPassphrase: Networks.PUBLIC,
   });
 
-  const xdr = await client.buildWithdrawal(publicKey, destination, "1.5", "USDC");
+  const tx = await client.buildWithdrawal(publicKey, destination, "1.5", "USDC");
   assert.deepEqual(calls.loadAccount, [publicKey]);
+  assert.equal(tx.networkPassphrase, Networks.PUBLIC);
+  assert.equal(tx.operations[0].amount, "1.5000000");
+  assert.equal(tx.operations[0].asset.code, "USDC");
+  assert.equal(tx.operations[0].asset.issuer, issuer);
 
-  const unsigned = new Transaction(xdr, Networks.PUBLIC);
-  assert.equal(unsigned.networkPassphrase, Networks.PUBLIC);
-  assert.equal(unsigned.operations[0].amount, "1.5000000");
-  assert.equal(unsigned.operations[0].asset.code, "USDC");
-  assert.equal(unsigned.operations[0].asset.issuer, issuer);
-
-  const signed = client.signTransaction(xdr, Keypair.random().secret());
-  assert.notEqual(signed, xdr);
+  const signed = client.signTransaction(tx.toXDR(), Keypair.random().secret());
+  assert.notEqual(signed, tx.toXDR());
   const result = await client.submitTransaction(signed);
   assert.equal(result.hash, "mock-hash");
   assert.equal(calls.submitTransaction.length, 1);
@@ -116,7 +114,7 @@ test("pathPayment client quotes and sends through an injected server", async t =
   });
 
   const paths = await client.quotePath("XLM", "10", "USDC");
-  assert.equal(paths.records.length, 1);
+  assert.equal(paths.length, 1);
   assert.equal(calls.strictReceivePaths[0].amount, "10");
   assert.equal(calls.strictReceivePaths[0].destAsset.issuer, issuer);
 
@@ -151,7 +149,7 @@ test("trustlines client inspects and adds trustlines through an injected server"
   });
 
   const trusted = await client.checkTrustline(publicKey, "USDC");
-  assert.equal(trusted.balance, "5");
+  assert.equal(trusted, true);
   assert.deepEqual(calls.loadAccount, [publicKey]);
 
   const result = await client.addTrustline(

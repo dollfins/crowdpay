@@ -14,9 +14,13 @@
  *   node contracts/stellar/pathPayment.js --send <senderSecret> <destPublicKey> <sendAsset> <sendMax> <destAmount>
  */
 
-require("dotenv").config({
-  path: require("path").join(__dirname, "../../backend/.env"),
-});
+try {
+  require("dotenv").config({
+    path: require("path").join(__dirname, "../../backend/.env"),
+  });
+} catch {
+  // dotenv is not installed for every checkout; the process env still works.
+}
 
 const {
   Keypair,
@@ -24,41 +28,50 @@ const {
   Operation,
   Asset,
   BASE_FEE,
-} = require("@stellar/stellar-sdk");
+} = require("./sdk").loadStellarSdk();
 const {
   getHorizonServer,
   getNetworkPassphrase,
   createUsdcAsset,
+  resolveOptions,
 } = require("./horizon");
 
 // Authoritative value lives in backend/src/config/constants.js TX_TIMEOUT_CONTRIBUTION_S
 const TX_TIMEOUT_CONTRIBUTION_S = 30;
 
 function resolveAsset(code, options = {}) {
+  const config = resolveOptions(options);
   if (code === "XLM") return Asset.native();
-  if (code === "USDC") return createUsdcAsset(options);
+  if (code === "USDC") return createUsdcAsset(config);
   throw new Error(`Unknown asset: ${code}`);
 }
 
 /**
  * Find the best path and estimate how much send asset is needed
  * to receive a given amount of the destination asset.
+ * Returns the path records (empty when the DEX has no liquidity).
  */
-async function quotePath(sendAssetCode, sendAmount, destAssetCode, options = {}) {
-  const server = getHorizonServer(options);
-  const sendAsset = resolveAsset(sendAssetCode, options);
-  const destAsset = resolveAsset(destAssetCode, options);
+async function quotePath(
+  sendAssetCode,
+  sendAmount,
+  destAssetCode,
+  options = {},
+) {
+  const config = resolveOptions(options);
+  const server = getHorizonServer(config);
+  const sendAsset = resolveAsset(sendAssetCode, config);
+  const destAsset = resolveAsset(destAssetCode, config);
 
   // Use Stellar's path finding endpoint
   const paths = await server
-    .strictReceivePaths(sendAsset, destAsset, sendAmount)
+    .strictReceivePaths(sendAsset, destAsset, String(sendAmount))
     .call();
 
   if (!paths.records.length) {
     console.log(
       "No path found. The DEX may not have liquidity for this pair on testnet.",
     );
-    return paths;
+    return [];
   }
 
   console.log(
@@ -71,7 +84,8 @@ async function quotePath(sendAssetCode, sendAmount, destAssetCode, options = {})
     );
     console.log();
   }
-  return paths;
+
+  return paths.records;
 }
 
 /**
@@ -87,21 +101,22 @@ async function sendPathPayment(
   destAmount,
   options = {},
 ) {
-  const server = getHorizonServer(options);
+  const config = resolveOptions(options);
+  const server = getHorizonServer(config);
   const senderKeypair = Keypair.fromSecret(senderSecret);
   const senderAccount = await server.loadAccount(senderKeypair.publicKey());
-  const sendAsset = resolveAsset(sendAssetCode, options);
+  const sendAsset = resolveAsset(sendAssetCode, config);
 
   const tx = new TransactionBuilder(senderAccount, {
     fee: BASE_FEE,
-    networkPassphrase: getNetworkPassphrase(options),
+    networkPassphrase: getNetworkPassphrase(config),
   })
     .addOperation(
       Operation.pathPaymentStrictReceive({
         sendAsset,
         sendMax: String(sendMax),
         destination: destPublicKey,
-        destAsset: createUsdcAsset(options),
+        destAsset: resolveAsset("USDC", config),
         destAmount: String(destAmount),
         path: [], // let Stellar discover the path
       }),
@@ -147,9 +162,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  TX_TIMEOUT_CONTRIBUTION_S,
+  resolveAsset,
   quotePath,
   sendPathPayment,
-  resolveAsset,
   createClient,
   getServer: getHorizonServer,
 };

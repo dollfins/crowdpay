@@ -19,9 +19,13 @@
  *   node contracts/stellar/multiSig.js --submit <xdr>
  */
 
-require("dotenv").config({
-  path: require("path").join(__dirname, "../../backend/.env"),
-});
+try {
+  require("dotenv").config({
+    path: require("path").join(__dirname, "../../backend/.env"),
+  });
+} catch {
+  // dotenv is not installed for every checkout; the process env still works.
+}
 
 const {
   Keypair,
@@ -30,16 +34,21 @@ const {
   Operation,
   Asset,
   BASE_FEE,
-} = require("@stellar/stellar-sdk");
+} = require("./sdk").loadStellarSdk();
 const {
   getHorizonServer,
   getNetworkPassphrase,
   createUsdcAsset,
+  resolveOptions,
 } = require("./horizon");
 
 // Authoritative values live in backend/src/config/constants.js
 const TX_TIMEOUT_WITHDRAWAL_S = 300; // 5 minutes for standalone CLI script; backend uses 7-day TX_TIMEOUT_WITHDRAWAL_S
 
+/**
+ * Build the unsigned withdrawal transaction the creator signs.
+ * Returns the built transaction; the caller decides what to do with the XDR.
+ */
 async function buildWithdrawal(
   walletPublicKey,
   destPublicKey,
@@ -47,13 +56,14 @@ async function buildWithdrawal(
   assetCode,
   options = {},
 ) {
-  const server = getHorizonServer(options);
+  const config = resolveOptions(options);
+  const server = getHorizonServer(config);
   const account = await server.loadAccount(walletPublicKey);
-  const asset = assetCode === "XLM" ? Asset.native() : createUsdcAsset(options);
+  const asset = assetCode === "XLM" ? Asset.native() : createUsdcAsset(config);
 
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
-    networkPassphrase: getNetworkPassphrase(options),
+    networkPassphrase: getNetworkPassphrase(config),
   })
     .addOperation(
       Operation.payment({
@@ -65,15 +75,17 @@ async function buildWithdrawal(
     .setTimeout(TX_TIMEOUT_WITHDRAWAL_S)
     .build();
 
-  const xdr = tx.toXDR();
   console.log("Unsigned withdrawal XDR:");
-  console.log(xdr);
+  console.log(tx.toXDR());
   console.log("\nShare this XDR with the campaign creator to sign.");
-  return xdr;
+
+  return tx;
 }
 
+/** Add one signature and return the signed XDR. */
 function signTransaction(xdr, signerSecret, options = {}) {
-  const tx = new Transaction(xdr, getNetworkPassphrase(options));
+  const config = resolveOptions(options);
+  const tx = new Transaction(xdr, getNetworkPassphrase(config));
   const keypair = Keypair.fromSecret(signerSecret);
   tx.sign(keypair);
   const signed = tx.toXDR();
@@ -82,13 +94,13 @@ function signTransaction(xdr, signerSecret, options = {}) {
   return signed;
 }
 
+/** Add the platform signature and submit. */
 async function submitTransaction(xdr, options = {}) {
-  const server = getHorizonServer(options);
-  const passphrase = getNetworkPassphrase(options);
-  // Add platform signature before submitting
-  const tx = new Transaction(xdr, passphrase);
+  const config = resolveOptions(options);
+  const server = getHorizonServer(config);
+  const tx = new Transaction(xdr, getNetworkPassphrase(config));
   const platformKeypair = Keypair.fromSecret(
-    options.platformSecret || process.env.PLATFORM_SECRET_KEY,
+    config.platformSecret || process.env.PLATFORM_SECRET_KEY,
   );
   tx.sign(platformKeypair);
 
@@ -125,6 +137,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  TX_TIMEOUT_WITHDRAWAL_S,
   buildWithdrawal,
   signTransaction,
   submitTransaction,

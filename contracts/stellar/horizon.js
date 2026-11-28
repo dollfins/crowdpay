@@ -6,7 +6,7 @@
  * target mainnet, testnet, or an injected mock server.
  */
 
-const { Horizon, Networks, Asset } = require("@stellar/stellar-sdk");
+const { Horizon, Networks, Asset } = require("./sdk").loadStellarSdk();
 
 const TESTNET_HORIZON_URL = "https://horizon-testnet.stellar.org";
 const MAINNET_HORIZON_URL = "https://horizon.stellar.org";
@@ -57,6 +57,13 @@ function createUsdcAsset(options = {}) {
   return options.usdc || new Asset("USDC", env.USDC_ISSUER);
 }
 
+function resolveOptions(options = {}) {
+  if (options && typeof options.loadAccount === "function") {
+    return { server: options };
+  }
+  return options || {};
+}
+
 module.exports = {
   TESTNET_HORIZON_URL,
   MAINNET_HORIZON_URL,
@@ -67,4 +74,5 @@ module.exports = {
   getHorizonServer,
   resetHorizonServer,
   createUsdcAsset,
+  resolveOptions,
 };

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import { api } from '../services/api';
 import { getNetwork, signTransaction } from '@stellar/freighter-api';
 import { validateMonetaryInput } from '../utils/decimal';
@@ -38,59 +39,10 @@ function ConfirmLockModal({
 }) {
   const periodLabel = PERIOD_OPTIONS.find((p) => p.months === periodMonths)?.label.toLowerCase();
   const modalRef = useRef(null);
+  useModalA11y(modalRef, { onClose });
 
-  useEffect(() => {
-    const trigger = document.activeElement;
-    return () => {
-      if (trigger && typeof trigger.focus === 'function' && trigger.isConnected) {
-        trigger.focus();
-      }
-    };
-  }, []);
 
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
-  useEffect(() => {
-    const modal = modalRef.current;
-    if (!modal) return;
-    const initialFocusable = modal.querySelectorAll(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    );
-    initialFocusable[0]?.focus();
-
-    function trapTab(e) {
-      if (e.key !== 'Tab') return;
-      const focusable = modal.querySelectorAll(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusable.length === 0) {
-        e.preventDefault();
-        if (!modal.hasAttribute('tabindex')) modal.setAttribute('tabindex', '-1');
-        modal.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!modal.contains(document.activeElement)) {
-        e.preventDefault();
-        (e.shiftKey ? last : first)?.focus();
-      } else if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
-    }
-    modal.addEventListener('keydown', trapTab);
-    return () => modal.removeEventListener('keydown', trapTab);
-  }, []);
 
   return (
     <div className="modal-overlay" style={styles.overlay} onClick={onClose} role="presentation">
@@ -217,7 +169,6 @@ export default function RecurringPledgeForm({ campaignId, asset, walletType, onS
   }
 
   async function confirmPledgeFreighter() {
-    let subscription = null;
     try {
       const prepared = await api.prepareSubscription(campaignId, {
         amountPerPeriod: amount,
@@ -244,7 +195,7 @@ export default function RecurringPledgeForm({ campaignId, asset, walletType, onS
       if (signed?.error) throw new Error(signed.error?.message || 'Freighter signing failed');
       if (!signed?.signedTxXdr) throw new Error('Freighter did not return a signed transaction');
 
-      subscription = await api.submitSubscription(campaignId, {
+      const subscription = await api.submitSubscription(campaignId, {
         unsignedXdr: prepared.unsignedXdr,
         signedXdr: signed.signedTxXdr,
         amountPerPeriod: amount,
@@ -253,6 +204,10 @@ export default function RecurringPledgeForm({ campaignId, asset, walletType, onS
         totalPeriods,
       });
       setCreated(subscription);
+      setShowConfirm(false);
+      setOpen(false);
+      setAmountPerPeriod('');
+      onSubscribed?.(subscription);
     } catch (err) {
       if (err?.message && err.message.includes('expired')) {
         setError('This transaction has expired. Please request a new quote.');
@@ -261,12 +216,6 @@ export default function RecurringPledgeForm({ campaignId, asset, walletType, onS
       } else {
         setError(err.message || 'Freighter signing failed');
       }
-    }
-    setShowConfirm(false);
-    setOpen(false);
-    setAmountPerPeriod('');
-    if (subscription) {
-      onSubscribed?.(subscription);
     }
   }
 

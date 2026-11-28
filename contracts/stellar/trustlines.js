@@ -13,9 +13,13 @@
  *   node contracts/stellar/trustlines.js --check <accountPublicKey> <assetCode>
  */
 
-require("dotenv").config({
-  path: require("path").join(__dirname, "../../backend/.env"),
-});
+try {
+  require("dotenv").config({
+    path: require("path").join(__dirname, "../../backend/.env"),
+  });
+} catch {
+  // dotenv is not installed for every checkout; the process env still works.
+}
 
 const {
   Keypair,
@@ -23,21 +27,38 @@ const {
   Operation,
   Asset,
   BASE_FEE,
-} = require("@stellar/stellar-sdk");
-const { getHorizonServer, getNetworkPassphrase } = require("./horizon");
+} = require("./sdk").loadStellarSdk();
+const {
+  getHorizonServer,
+  getNetworkPassphrase,
+  resolveOptions,
+} = require("./horizon");
 
 // Authoritative value lives in backend/src/config/constants.js TX_TIMEOUT_CONTRIBUTION_S
 const TX_TIMEOUT_CONTRIBUTION_S = 30;
 
-async function addTrustline(accountSecret, assetCode, issuerPublicKey, options = {}) {
-  const server = getHorizonServer(options);
+/** Returns the balance entry for `assetCode`, or undefined when there is no trustline. */
+function findTrustline(balances, assetCode) {
+  if (!Array.isArray(balances)) return undefined;
+  return balances.find((balance) => balance.asset_code === assetCode);
+}
+
+/** Establish a trustline and submit it. */
+async function addTrustline(
+  accountSecret,
+  assetCode,
+  issuerPublicKey,
+  options = {},
+) {
+  const config = resolveOptions(options);
+  const server = getHorizonServer(config);
   const keypair = Keypair.fromSecret(accountSecret);
   const account = await server.loadAccount(keypair.publicKey());
   const asset = new Asset(assetCode, issuerPublicKey);
 
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
-    networkPassphrase: getNetworkPassphrase(options),
+    networkPassphrase: getNetworkPassphrase(config),
   })
     .addOperation(Operation.changeTrust({ asset }))
     .setTimeout(TX_TIMEOUT_CONTRIBUTION_S)
@@ -50,16 +71,18 @@ async function addTrustline(accountSecret, assetCode, issuerPublicKey, options =
   return result;
 }
 
+/** Report whether the account holds a trustline for `assetCode`. */
 async function checkTrustline(publicKey, assetCode, options = {}) {
-  const server = getHorizonServer(options);
+  const config = resolveOptions(options);
+  const server = getHorizonServer(config);
   const account = await server.loadAccount(publicKey);
-  const trusted = account.balances.find((b) => b.asset_code === assetCode);
+  const trusted = findTrustline(account.balances, assetCode);
   if (trusted) {
     console.log(`${assetCode} trustline found. Balance: ${trusted.balance}`);
-  } else {
-    console.log(`No trustline for ${assetCode} on this account.`);
+    return true;
   }
-  return trusted || null;
+  console.log(`No trustline for ${assetCode} on this account.`);
+  return false;
 }
 
 function createClient(options = {}) {
@@ -82,11 +105,15 @@ if (require.main === module) {
     console.log(
       "  node trustlines.js --add <accountSecret> <assetCode> <issuerPublicKey>",
     );
-    console.log("  node trustlines.js --check <accountPublicKey> <assetCode>");
+    console.log(
+      "  node trustlines.js --check <accountPublicKey> <assetCode>",
+    );
   }
 }
 
 module.exports = {
+  TX_TIMEOUT_CONTRIBUTION_S,
+  findTrustline,
   addTrustline,
   checkTrustline,
   createClient,

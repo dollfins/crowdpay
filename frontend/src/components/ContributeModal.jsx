@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types -- Component has many props; prop-types not used in this codebase */
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import {
   getNetwork,
   isConnected as isFreighterConnected,
@@ -210,6 +211,8 @@ export default function ContributeModal({
     onClose();
   };
 
+  useModalA11y(modalRef, { onClose: handleClose, resetKey: phase });
+
   // Fetch anchor info and existing contributions on mount
   useEffect(() => {
     api
@@ -300,13 +303,6 @@ export default function ContributeModal({
     return () => clearTimeout(t);
   }, [fetchQuote, isPathPayment]);
 
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   useEffect(() => () => signingAbortRef.current?.abort(), []);
 
@@ -404,33 +400,6 @@ export default function ContributeModal({
     };
   }, [anchorSession?.id, onSuccess, phase, token]);
 
-  useEffect(() => {
-    const modal = modalRef.current;
-    if (!modal) return;
-    const focusable = modal.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    first?.focus();
-
-    function trapTab(e) {
-      if (e.key !== 'Tab') return;
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
-    }
-    modal.addEventListener('keydown', trapTab);
-    return () => modal.removeEventListener('keydown', trapTab);
-  }, [phase]);
 
   // Attribution travels as a query parameter so it lands in the Stellar memo (#675)
   const referralQuery = referralCode ? { query: { ref: referralCode } } : {};
